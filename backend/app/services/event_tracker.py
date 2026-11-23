@@ -142,6 +142,35 @@ class EventTrackerService(BaseModuleService):
                           "first": r["first_at"], "last": r["last_at"]} for r in rows],
         }
 
+    # ================================================================
+    # 整组重放：多选历史批次一次提交，产出重放批次并驱动窗口补算
+    # ================================================================
+
+    def list_source_batches(self) -> list[dict[str, Any]]:
+        """列出可供重放选择的历史事件批次。"""
+        from app import replay
+        return replay.list_source_batches()
+
+    def submit_replay_group(
+        self, source_batch_ids: list[str], group_name: str = "", note: str = "",
+    ) -> dict[str, Any]:
+        """整组重放提交：同组批次可跨日期，样本缺失的批次留待续办。"""
+        from app import replay
+        return replay.submit_replay_group(source_batch_ids, group_name=group_name, note=note)
+
+    def resume_replay_group(self, group_id: int) -> dict[str, Any]:
+        """恢复缺失批次样本后续办，已计入的贡献不会重复计入。"""
+        from app import replay
+        return replay.resume_replay_group(group_id)
+
+    def list_replay_groups(self, status: str | None = None) -> list[dict[str, Any]]:
+        from app import replay
+        return replay.list_replay_groups(status=status)
+
+    def get_replay_group(self, group_id: int) -> dict[str, Any] | None:
+        from app import replay
+        return replay.get_replay_group(group_id)
+
     def domain_snapshot(self) -> dict[str, Any]:
         snapshot = super().domain_snapshot()
         total_events = db.count("events")

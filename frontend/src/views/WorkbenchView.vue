@@ -90,12 +90,24 @@
       <span>共 {{ total }} 条{{ meta.name }}记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
+
+    <ReplayConsole
+      v-if="props.moduleKey === 'event_tracker'"
+      mode="event_tracker"
+      data-testid="event-tracker-replay"
+    />
+    <ReplayConsole
+      v-else-if="props.moduleKey === 'realtime_agg'"
+      mode="realtime_agg"
+      data-testid="realtime-agg-correction"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 
+import ReplayConsole from '@/components/ReplayConsole.vue'
 import {
   createEntry,
   downloadEntries,

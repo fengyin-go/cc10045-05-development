@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
+from pydantic import BaseModel, Field
 
 from app.database import db
 from app.pipeline import (
@@ -13,6 +14,12 @@ from app.pipeline import (
 from app.services import service_for
 
 router = APIRouter(prefix="/api/pipeline", tags=["分析管线"])
+
+
+class ReplayGroupPayload(BaseModel):
+    source_batch_ids: list[str] = Field(default_factory=list)
+    group_name: str = ""
+    note: str = ""
 
 
 @router.post("/seed")
@@ -173,3 +180,90 @@ def api_full_pipeline() -> dict:
     steps["reports"] = {"processed": len(reports), "results": report_results}
 
     return {"ok": True, "pipeline": steps}
+
+
+# ============================================================================
+# 整组重放与窗口补算
+# ============================================================================
+
+@router.get("/replay/batches")
+def api_replay_source_batches() -> dict:
+    """列出可被整组重放选择的历史事件批次。"""
+    svc = service_for("event_tracker")
+    items = svc.list_source_batches()
+    return {"ok": True, "items": items, "total": len(items)}
+
+
+@router.post("/replay/groups")
+def api_submit_replay_group(payload: ReplayGroupPayload) -> dict:
+    """值班员多选批次一次提交整组重放（同组批次可跨日期）。"""
+    svc = service_for("event_tracker")
+    return svc.submit_replay_group(
+        payload.source_batch_ids, group_name=payload.group_name, note=payload.note)
+
+
+@router.get("/replay/groups")
+def api_list_replay_groups(status: str | None = None) -> dict:
+    """列出回放组及其来源批次办理状态。"""
+    svc = service_for("event_tracker")
+    items = svc.list_replay_groups(status=status)
+    return {"ok": True, "items": items, "total": len(items)}
+
+
+@router.get("/replay/groups/{group_id}")
+def api_get_replay_group(group_id: int) -> dict:
+    """回放组详情：来源批次、重放事件接受情况、受影响窗口。"""
+    svc = service_for("event_tracker")
+    group = svc.get_replay_group(group_id)
+    if group is None:
+        return {"ok": False, "message": f"回放组 {group_id} 不存在"}
+    return {"ok": True, "group": group}
+
+
+@router.post("/replay/groups/{group_id}/resume")
+def api_resume_replay_group(group_id: int) -> dict:
+    """缺失批次样本恢复后续办，已计入贡献不会重复计入。"""
+    svc = service_for("event_tracker")
+    return svc.resume_replay_group(group_id)
+
+
+@router.get("/aggregation/corrections/sources")
+def api_correction_sources(
+    replay_group_id: int | None = None, source_batch_id: str | None = None,
+) -> dict:
+    """溯源回查：补算分组收到了哪个回放组的哪个原始批次。"""
+    svc = service_for("realtime_agg")
+    items = svc.list_correction_sources(
+        replay_group_id=replay_group_id, source_batch_id=source_batch_id)
+    return {"ok": True, "items": items, "total": len(items)}
+
+
+@router.get("/aggregation/corrections")
+def api_list_corrections(
+    window_id: int | None = None,
+    status: str | None = None,
+    replay_group_id: int | None = None,
+) -> dict:
+    """列出窗口补算结果；待验明窗口不会被当作完成补算。"""
+    svc = service_for("realtime_agg")
+    items = svc.list_corrections(
+        window_id=window_id, status_filter=status, replay_group_id=replay_group_id)
+    return {"ok": True, "items": items, "total": len(items)}
+
+
+@router.get("/aggregation/corrections/{correction_id}")
+def api_get_correction(correction_id: int) -> dict:
+    """单条补算分组详情，含修正值、源记录数与原始批次溯源链。"""
+    svc = service_for("realtime_agg")
+    item = svc.get_correction(correction_id)
+    if item is None:
+        return {"ok": False, "message": f"补算记录 {correction_id} 不存在"}
+    return {"ok": True, "correction": item}
+
+
+@router.get("/aggregation/windows/{window_id}/correction-sources")
+def api_window_correction_sources(window_id: int, window_start: str) -> dict:
+    """回查指定窗口时间桶的源记录台账（LIVE/REPLAY 贡献）。"""
+    svc = service_for("realtime_agg")
+    items = svc.window_source_records(window_id, window_start)
+    return {"ok": True, "items": items, "total": len(items)}

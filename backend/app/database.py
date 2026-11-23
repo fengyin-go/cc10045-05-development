@@ -353,6 +353,106 @@ DDL_STATEMENTS = [
         daily_calls INTEGER DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )""",
+
+    # ==================== Replay & Correction Tier ====================
+    # 整组重放：值班员多选历史批次一次提交，组内批次可跨日期、分批恢复
+    """CREATE TABLE IF NOT EXISTS replay_groups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        replay_group_code TEXT NOT NULL UNIQUE,
+        group_name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT '待处理' CHECK(status IN ('待处理','处理中','已完成')),
+        note TEXT DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )""",
+
+    """CREATE TABLE IF NOT EXISTS replay_group_sources (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        replay_group_id INTEGER NOT NULL,
+        source_batch_id TEXT NOT NULL,
+        business_date TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT '待读取' CHECK(status IN ('待读取','已读取','样本缺失')),
+        event_total INTEGER NOT NULL DEFAULT 0,
+        event_accepted INTEGER NOT NULL DEFAULT 0,
+        event_duplicated INTEGER NOT NULL DEFAULT 0,
+        message TEXT DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(replay_group_id, source_batch_id),
+        FOREIGN KEY (replay_group_id) REFERENCES replay_groups(id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_rgs_group ON replay_group_sources(replay_group_id)",
+
+    # 重放批次：读取原批次记录的事件与发生时间后落库的重放副本
+    """CREATE TABLE IF NOT EXISTS replay_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        replay_group_id INTEGER NOT NULL,
+        source_id INTEGER NOT NULL,
+        replay_event_id INTEGER,
+        replay_batch_id TEXT NOT NULL,
+        source_batch_id TEXT NOT NULL,
+        event_name TEXT NOT NULL,
+        event_attrs TEXT NOT NULL DEFAULT '{}',
+        occurred_at TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        accept_status TEXT NOT NULL DEFAULT '已接受' CHECK(accept_status IN ('已接受','重复跳过')),
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_re_group ON replay_events(replay_group_id)",
+    "CREATE INDEX IF NOT EXISTS idx_re_batch ON replay_events(replay_batch_id)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_re_group_source ON replay_events(replay_group_id, source_id)",
+
+    # 窗口贡献台账：同一原始事件（指纹）在同一窗口同一时间桶只贡献一次
+    """CREATE TABLE IF NOT EXISTS agg_correction_contributions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        window_id INTEGER NOT NULL,
+        window_start TEXT NOT NULL,
+        window_end TEXT NOT NULL,
+        event_fingerprint TEXT NOT NULL,
+        origin_type TEXT NOT NULL CHECK(origin_type IN ('LIVE','REPLAY')),
+        event_id INTEGER,
+        source_event_id INTEGER,
+        replay_group_id INTEGER,
+        source_batch_id TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(window_id, window_start, event_fingerprint)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_acc_window_bucket ON agg_correction_contributions(window_id, window_start)",
+    "CREATE INDEX IF NOT EXISTS idx_acc_group ON agg_correction_contributions(replay_group_id)",
+
+    # 修正后的窗口汇总：尚未验明完整的窗口保持“待验明”，不得标记为已完成补算
+    """CREATE TABLE IF NOT EXISTS agg_correction_results (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        window_id INTEGER NOT NULL,
+        window_start TEXT NOT NULL,
+        window_end TEXT NOT NULL,
+        dimension_key TEXT NOT NULL DEFAULT '',
+        computed_value REAL NOT NULL DEFAULT 0.0,
+        event_count INTEGER NOT NULL DEFAULT 0,
+        source_record_count INTEGER NOT NULL DEFAULT 0,
+        replay_group_id INTEGER,
+        computation_version INTEGER NOT NULL DEFAULT 1,
+        status TEXT NOT NULL DEFAULT '待验明' CHECK(status IN ('待验明','已修正')),
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(window_id, window_start, dimension_key)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_acr_window ON agg_correction_results(window_id, window_start)",
+    "CREATE INDEX IF NOT EXISTS idx_acr_group ON agg_correction_results(replay_group_id)",
+
+    # 修正分组 → 原始批次的溯源链：可回查已修正分组收到了哪个原始批次
+    """CREATE TABLE IF NOT EXISTS agg_correction_sources (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        correction_id INTEGER NOT NULL,
+        replay_group_id INTEGER NOT NULL,
+        source_batch_id TEXT NOT NULL,
+        event_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(correction_id, replay_group_id, source_batch_id),
+        FOREIGN KEY (correction_id) REFERENCES agg_correction_results(id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_acs_group ON agg_correction_sources(replay_group_id)",
+    "CREATE INDEX IF NOT EXISTS idx_acs_batch ON agg_correction_sources(source_batch_id)",
 ]
 
 

@@ -79,5 +79,30 @@ npm run dev
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
 
+## 整组重放与窗口补算
+
+事件追踪器支持把多个历史事件批次（可跨日期）作为一个回放组一次提交，
+领域逻辑集中在 `backend/app/replay.py`，前端控制台挂在事件追踪器与实时聚合器页面。
+
+- 重放读取原批次记录的事件与发生时间，产出 `REPLAY_` 重放批次；样本暂时缺失的批次
+  标记“样本缺失”，数据恢复后调用续办接口继续办理，组状态在“处理中/已完成”间流转。
+- 实时聚合器按窗口大小对齐固定时间桶，贡献台账
+  `agg_correction_contributions` 以（窗口 × 时间桶 × 事件指纹）唯一约束保证
+  同一原始事件在同一窗口只贡献一次；同组重放请求重复提交走幂等路径，不会多计。
+- 补算结果 `agg_correction_results` 区分“待验明/已修正”：关联回放组仍有缺失批次的
+  窗口保持待验明，不能当作完成补算；补齐续办后自动转为已修正。
+- 溯源表 `agg_correction_sources` 记录每个修正分组收到的回放组与原始批次，
+  支持从修正结果回查同组不同日期/来源的贡献。
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /api/pipeline/replay/batches` | 可选历史批次清单（含业务日期） |
+| `POST /api/pipeline/replay/groups` | 多选批次一次提交整组重放 |
+| `GET /api/pipeline/replay/groups` / `/{id}` | 回放组进度、重放事件与受影响窗口 |
+| `POST /api/pipeline/replay/groups/{id}/resume` | 缺失批次恢复后续办 |
+| `GET /api/pipeline/aggregation/corrections` | 窗口补算结果（可按状态/窗口/回放组筛选） |
+| `GET /api/pipeline/aggregation/corrections/sources` | 修正分组 → 原始批次溯源回查 |
+| `GET /api/pipeline/aggregation/windows/{id}/correction-sources` | 窗口时间桶源记录台账 |
+
 领域：数据工程
 子方向：数据分析与数据应用

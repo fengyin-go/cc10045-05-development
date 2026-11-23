@@ -112,6 +112,37 @@ class RealtimeAggService(BaseModuleService):
             total_results += len(r["results"])
         return {"ok": True, "windows_processed": len(windows), "total_results": total_results, "summary": summary}
 
+    # ================================================================
+    # 重放补算：关联实际接受的原事件与窗口，修正窗口汇总并支持溯源
+    # ================================================================
+
+    def list_corrections(
+        self, window_id: int | None = None, status_filter: str | None = None,
+        replay_group_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """列出窗口补算结果，可按窗口、补算状态、回放组筛选。"""
+        from app import replay
+        return replay.list_corrections(
+            window_id=window_id, status_filter=status_filter, replay_group_id=replay_group_id)
+
+    def get_correction(self, correction_id: int) -> dict[str, Any] | None:
+        """查询单条补算分组及其收到的原始批次溯源链。"""
+        from app import replay
+        return replay.get_correction(correction_id)
+
+    def list_correction_sources(
+        self, replay_group_id: int | None = None, source_batch_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """回查哪些补算分组收到了哪个原始批次（同组不同日期/来源可核）。"""
+        from app import replay
+        return replay.list_correction_sources(
+            replay_group_id=replay_group_id, source_batch_id=source_batch_id)
+
+    def window_source_records(self, window_id: int, window_start: str) -> list[dict[str, Any]]:
+        """回查窗口时间桶的源记录台账，核对同一事件是否只贡献一次。"""
+        from app import replay
+        return replay.window_source_records(window_id, window_start)
+
     def time_range_analysis(
         self, window_id: int, start_time: str, end_time: str,
     ) -> dict[str, Any]:
